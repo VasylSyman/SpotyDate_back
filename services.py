@@ -1,17 +1,13 @@
 import hashlib
-from operator import truediv
-
 from supabase_client import get_supabase_client
 from schemas import *
 
 supabase = get_supabase_client()
 
-def hash_password(password: str) -> str:
-    """Hash a password using SHA256."""
+def hash_password(password: str) -> str :
     return hashlib.sha256(password.encode()).hexdigest()
 
 async def register_user(user: UserCreate):
-
     hashed_password = hash_password(user.password)
 
     request_body = {
@@ -28,19 +24,15 @@ async def register_user(user: UserCreate):
         .execute()
     )
 
-    print(response)
     return {"message": "User registered successfully"}
 
 
-async def unique_email(email:Email):
+async def unique_email(email: str) -> bool:
     response = (
         supabase.table("users")
         .select("*")
-        .eq("email", email.email)
+        .eq("email", email)
         .execute()
     )
 
-    if len(response.data) == 0:
-        return True
-    else:
-        return False
+    return len(response.data) == 0

@@ -19,19 +19,14 @@ app.add_middleware(
 @app.post("/register")
 async def register(user: UserCreate):
     try:
+        if not await unique_email(user.email):
+            raise HTTPException(status_code=400, detail="Email already in use")
+
         return await register_user(user)
+
     except HTTPException as e:
         raise e
-
-@app.post("/unique_email")
-async def check_unique_email(email: Email):
-    try:
-        return await unique_email(email)
-    except HTTPException as e:
-        raise e
-
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
