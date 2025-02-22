@@ -58,3 +58,17 @@ async def unique_email(email: str) -> bool:
     )
 
     return len(response.data) == 0
+
+
+async def current_user_data(email: str) -> dict:
+    response = (
+        supabase.table("users")
+        .select("first_name", "last_name", "birth_date", "gender", "bio", "location", "profile_picture_url")
+        .eq("email", email)
+        .execute()
+    )
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return response.data[0]

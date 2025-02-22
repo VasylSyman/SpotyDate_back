@@ -45,6 +45,13 @@ async def check_unique_email(email: Email):
 async def verify_token_route(email: str = Depends(get_current_user)):
     return {"email": email, "message": "Token is valid"}
 
+@app.get("/user/me", response_model=User)
+async def get_current_user_data(current_user_email: str = Depends(get_current_user)):
+    try:
+        return await current_user_data(current_user_email)
+    except HTTPException as e:
+        raise e
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
