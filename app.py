@@ -27,6 +27,13 @@ async def register(user: UserCreate):
     except HTTPException as e:
         raise e
 
+@app.post("/unique_email")
+async def check_unique_email(email: Email):
+    try:
+        return await unique_email(email.email)
+    except HTTPException as e:
+        raise e
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
