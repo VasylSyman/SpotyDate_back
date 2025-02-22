@@ -1,9 +1,8 @@
-from enum import unique
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from schemas import UserCreate
 from services import *
+from auth import *
 
 app = FastAPI()
 
@@ -27,10 +26,25 @@ async def register(user: UserCreate):
     except HTTPException as e:
         raise e
 
+@app.post("/login")
+async def login(user: LoginUser):
+    try:
+        return await login_user(user)
+
+    except HTTPException as e:
+        raise e
+
 @app.post("/unique_email")
 async def check_unique_email(email: Email):
     try:
         return await unique_email(email.email)
+    except HTTPException as e:
+        raise e
+
+@app.get("/test")
+async def test(user: str = Depends(get_current_user)):
+    try:
+        return {"message": f"Hello, {user}. You have access to this protected route!"}
     except HTTPException as e:
         raise e
 

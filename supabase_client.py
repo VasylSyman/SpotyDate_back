@@ -10,12 +10,3 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
 
 def get_supabase_client():
     return supabase
-
-response = (
-    supabase.table("users")
-    .select("*")
-    .eq("email", "vasyl@gmail.com")
-    .execute()
-)
-
-print(response)
