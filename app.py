@@ -41,12 +41,9 @@ async def check_unique_email(email: Email):
     except HTTPException as e:
         raise e
 
-@app.get("/test")
-async def test(user: str = Depends(get_current_user)):
-    try:
-        return {"message": f"Hello, {user}. You have access to this protected route!"}
-    except HTTPException as e:
-        raise e
+@app.get("/verify_token")
+async def verify_token_route(email: str = Depends(get_current_user)):
+    return {"email": email, "message": "Token is valid"}
 
 if __name__ == "__main__":
     import uvicorn
