@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from schemas import UserCreate
 from services import *
@@ -51,6 +51,24 @@ async def get_current_user_data(current_user_email: str = Depends(get_current_us
         return await current_user_data(current_user_email)
     except HTTPException as e:
         raise e
+
+@app.post("/update_user/me")
+async def update_current_user_data(
+    first_name: Optional[str] = Form(None),
+    last_name: Optional[str] = Form(None),
+    birth_date: Optional[str] = Form(None),
+    gender: Optional[str] = Form(None),
+    bio: Optional[str] = Form(None),
+    location: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    current_user_email: str = Depends(get_current_user)
+):
+    try:
+        return await current_user_data_update(first_name, last_name, birth_date, gender,
+                                              bio, location, file, current_user_email)
+    except HTTPException as e:
+        raise e
+
 
 if __name__ == "__main__":
     import uvicorn

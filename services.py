@@ -2,9 +2,12 @@ from supabase_client import get_supabase_client
 from schemas import *
 from fastapi import HTTPException
 from auth import *
-from datetime import timedelta
+from datetime import timezone, datetime
+import os
+from dotenv import load_dotenv
 
-
+load_dotenv()
+SUPABASE_STORAGE_URL = os.getenv("SUPABASE_STORAGE_URL")
 supabase = get_supabase_client()
 
 async def register_user(user: UserCreate):
@@ -72,3 +75,46 @@ async def current_user_data(email: str) -> dict:
         raise HTTPException(status_code=404, detail="User not found")
 
     return response.data[0]
+
+async def current_user_data_update(first_name, last_name, birth_date, gender,
+                                              bio, location, file, current_user_email):
+        request_body = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "birth_date": birth_date,
+            "gender": gender,
+            "bio": bio,
+            "location": location,
+        }
+
+        if file is not None:
+            request_body["profile_picture_url"] = await upload_image(file, current_user_email)
+
+        request_body = {k: v for k, v in request_body.items() if v is not None}
+
+        response = (
+            supabase.table("users")
+            .update(request_body)
+            .eq("email", current_user_email)
+            .execute()
+        )
+
+        if not response.data:
+            raise HTTPException(status_code=400, detail="User update failed")
+
+        return {"code": 200, "message": "User updated successfully"}
+
+
+async def upload_image(file, current_user_email):
+    try:
+        file_ext = file.filename.split(".")[-1]
+        current_time = datetime.now(timezone.utc)
+        file_name = f"public/{current_user_email}_{current_time.timestamp()}.{file_ext}"
+
+        file_content = await file.read()
+
+        upload_response = supabase.storage.from_("SpotyDate").upload(file_name, file_content)
+
+        return SUPABASE_STORAGE_URL + upload_response.full_path
+    except Exception as e:
+        raise e
