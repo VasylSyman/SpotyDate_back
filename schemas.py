@@ -1,6 +1,6 @@
 from pydantic import BaseModel
-from datetime import date
-from typing import Optional
+from datetime import date, datetime
+from typing import Optional, List
 
 class UserCreate(BaseModel):
     email: str
@@ -28,3 +28,29 @@ class Token(BaseModel):
 
 class Email(BaseModel):
     email:str
+
+class SpotifyToken(BaseModel):
+    access_token: str
+    refresh_token: str
+    expires_at: datetime
+    token_type: str
+    scope: str
+
+class SpotifyProfile(BaseModel):
+    spotify_id: str
+    display_name: Optional[str]
+    connected_at: datetime
+
+class SpotifyCallbackRequest(BaseModel):
+    code: str
+
+class ArtistBasicInfo(BaseModel):
+    id: str
+    name: str
+
+class TrackBasicInfo(BaseModel):
+    id: str
+    name: str
+
+class GenreList(BaseModel):
+    genres: List[str]
