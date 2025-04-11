@@ -5,6 +5,7 @@ from auth import *
 from datetime import timezone, datetime
 import os
 from dotenv import load_dotenv
+import spotipy
 
 load_dotenv()
 SUPABASE_STORAGE_URL = os.getenv("SUPABASE_STORAGE_URL")
@@ -30,8 +31,6 @@ async def register_user(user: UserCreate):
         .execute()
     )
 
-    if response.error:
-        raise HTTPException(status_code=500, detail="Database error")
 
     access_token = create_access_token(data={"sub": user.email}, expires_delta=30)
     return {"access_token": access_token, "token_type": "bearer"}
@@ -64,17 +63,38 @@ async def unique_email(email: str) -> bool:
 
 
 async def current_user_data(email: str) -> dict:
-    response = (
+    user_response = (
         supabase.table("users")
-        .select("first_name", "last_name", "birth_date", "gender", "bio", "location", "profile_picture_url")
+        .select("user_id", "first_name", "last_name", "birth_date", "gender", "bio", "location", "profile_picture_url")
         .eq("email", email)
+        .maybe_single()
         .execute()
     )
 
-    if not response.data:
+    if not user_response.data:
         raise HTTPException(status_code=404, detail="User not found")
 
-    return response.data[0]
+    user_data = user_response.data
+    user_id = user_data.get("user_id")
+
+    genre_response = (
+        supabase.table("user_genres")
+        .select("genres(name)")
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    genres = [
+        item["genres"]["name"]
+        for item in genre_response.data
+        if item.get("genres") and item["genres"].get("name")
+    ] if genre_response.data else []
+
+    user_data["genres"] = genres
+
+    user_data.pop("user_id", None)
+
+    return user_data
 
 async def current_user_data_update(first_name, last_name, birth_date, gender,
                                               bio, location, file, current_user_email):
@@ -129,7 +149,7 @@ async def tracks_upload(input_tracks, current_user_email):
     for track in input_tracks:
         track_id = track.id
         track_name = track.name
-        if track_id and track_name:  # Basic validation
+        if track_id and track_name:
             tracks_to_insert.append({"track_id": track_id, "name": track_name})
             valid_track_ids.add(track_id)
 
@@ -140,7 +160,7 @@ async def tracks_upload(input_tracks, current_user_email):
     ).execute()
 
     user_tracks_to_insert = []
-    for track_id in valid_track_ids:  # Use only the valid IDs prepared earlier
+    for track_id in valid_track_ids:
         user_tracks_to_insert.append({"user_id": user_id, "track_id": track_id})
 
     response_user_tracks = supabase.table("user_tracks").upsert(
@@ -171,7 +191,7 @@ async def artists_upload(input_artists, current_user_email):
 
 
     user_artists_to_insert = []
-    for artist_id in valid_artist_ids:  # Use only the valid IDs prepared earlier
+    for artist_id in valid_artist_ids:
         user_artists_to_insert.append({"user_id": user_id, "artist_id": artist_id})
 
     response_user_artists = supabase.table("user_artists").upsert(
@@ -181,47 +201,122 @@ async def artists_upload(input_artists, current_user_email):
 
 
 async def genres_upload(input_genres: List[str], current_user_email: str):
-    # 1. Get User ID
     user_response = supabase.table("users").select("user_id").eq("email", current_user_email).maybe_single().execute()
-    # Assume user_response.data is not None and contains 'user_id'
     user_id = user_response.data.get("user_id")
 
-    # 2. Prepare genre data for upsert
-    genres_to_upsert = [{"name": genre} for genre in input_genres if genre] # Ensure genre is not empty
+    genres_to_upsert = [{"name": genre} for genre in input_genres if genre]
 
-    # 3. Upsert genres into the 'genres' table
-    # This ensures all genres exist. Handles conflicts based on the 'name' column.
-    if genres_to_upsert: # Avoid running upsert with empty list
+    if genres_to_upsert:
         supabase.table("genres").upsert(
             genres_to_upsert,
-            on_conflict='name' # Assumes 'name' has a unique constraint
+            on_conflict='name'
         ).execute()
-        # Ignore response/error as requested
 
-    # 4. Fetch IDs for all relevant genres (now that they exist)
-    # Fetch only if there were input genres to avoid empty 'in_' clause error
     genre_name_to_id_map = {}
     if input_genres:
         response_fetch_genres = supabase.table("genres").select("genre_id", "name").in_("name", input_genres).execute()
-        # Assume response_fetch_genres.data is a list of dicts
         genre_name_to_id_map = {genre["name"]: genre["genre_id"] for genre in response_fetch_genres.data}
 
-    # 5. Prepare user-genre links
     user_genres_to_insert = []
-    for genre_name in input_genres: # Iterate through the input strings
-        # Use the string directly to look up in the map
+    for genre_name in input_genres:
         genre_id = genre_name_to_id_map.get(genre_name)
-        if user_id and genre_id: # Ensure both IDs are valid
+        if user_id and genre_id:
             user_genres_to_insert.append({"user_id": user_id, "genre_id": genre_id})
 
-    # 6. Insert user-genre links
-    # Use upsert or insert based on whether you want to ignore existing links
-    # Assuming user_id, genre_id is the primary/unique key for user_genres
     if user_genres_to_insert:
         supabase.table("user_genres").upsert(
             user_genres_to_insert,
-            # on_conflict='user_id, genre_id' # More explicit if constraint exists
-            # ignore_duplicates=True # Alternative if you just want to skip existing pairs
-        ).execute() # Using upsert as per user's last version, might need on_conflict based on schema
-        # Ignore response/error as requested
+        ).execute()
+
+
+async def fetch_and_process_top_artists(spotify, current_user_email):
+    top_artists_data = spotify.current_user_top_artists(
+        limit=50,
+        time_range='medium_term'
+    )
+    parsed_artists = []
+    if top_artists_data and 'items' in top_artists_data:
+        for artist_item in top_artists_data['items']:
+            if isinstance(artist_item, dict) and 'id' in artist_item and 'name' in artist_item:
+                parsed_artists.append(
+                    ArtistBasicInfo(id=artist_item['id'], name=artist_item['name'])
+                )
+
+    await artists_upload(parsed_artists, current_user_email)
+
+
+async def fetch_and_process_top_tracks(spotify, current_user_email):
+    top_tracks_data = spotify.current_user_top_tracks(
+        limit=50,
+        time_range='medium_term'
+    )
+
+    parsed_tracks = []
+    if top_tracks_data and 'items' in top_tracks_data:
+        for track_item in top_tracks_data['items']:
+            if isinstance(track_item, dict) and 'id' in track_item and 'name' in track_item:
+                parsed_tracks.append(
+                    TrackBasicInfo(id=track_item['id'], name=track_item['name'])
+                )
+
+    await tracks_upload(parsed_tracks, current_user_email)
+
+
+async def fetch_and_process_genres(spotify, current_user_email):
+    all_genres = set()
+    all_artist_ids = set()
+    top_limit = 50
+    time_range = "medium_term"
+
+
+    # --- 1. Process Saved Tracks ---
+    saved_tracks_data = spotify.current_user_saved_tracks(limit=top_limit)
+    if saved_tracks_data and 'items' in saved_tracks_data:
+        for item in saved_tracks_data.get('items', []):
+            track = item.get('track')
+            if track and track.get('artists'):
+                for artist in track['artists']:
+                    if artist and artist.get('id'):
+                        all_artist_ids.add(artist['id'])
+
+
+    # --- 2. Process Top Tracks ---
+    top_tracks_data = spotify.current_user_top_tracks(limit=top_limit, time_range=time_range)
+    if top_tracks_data and 'items' in top_tracks_data:
+        for track in top_tracks_data.get('items', []):
+            if track and track.get('artists'):
+                for artist in track['artists']:
+                    if artist and artist.get('id'):
+                        all_artist_ids.add(artist['id'])
+
+    # --- 3. Process Top Artists (Direct Genre Addition + ID Collection) ---
+    top_artists_data = spotify.current_user_top_artists(limit=top_limit, time_range=time_range)
+    if top_artists_data and 'items' in top_artists_data:
+        for artist in top_artists_data.get('items', []):
+            if artist:
+                artist_id = artist.get('id')
+                artist_genres = artist.get('genres')
+                if artist_id:
+                    all_artist_ids.add(artist_id)
+                if artist_genres:
+                    all_genres.update(artist_genres)
+
+    # --- 4. Fetch Details for All Collected Artist IDs ---
+    if all_artist_ids:
+        artist_ids_list = list(all_artist_ids)
+        batch_size = 50
+        for i in range(0, len(artist_ids_list), batch_size):
+            batch_ids = artist_ids_list[i:i + batch_size]
+            artists_details = spotify.artists(batch_ids)
+            if artists_details and artists_details.get('artists'):
+                for artist in artists_details['artists']:
+                    if artist and artist.get('genres'):
+                        all_genres.update(artist['genres'])
+
+
+    # --- 5. Return Final Sorted List ---
+    sorted_genres = sorted(list(all_genres))
+    await genres_upload(sorted_genres, current_user_email)
+
+    return sorted_genres
 
