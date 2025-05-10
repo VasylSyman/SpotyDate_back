@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, Security
 from fastapi.security import OAuth2PasswordBearer
 
 load_dotenv()
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM= os.getenv("ALGORITHM")
 TOKEN_EXPIRY_MINUTES= os.getenv("TOKEN_EXPIRY_MINUTES")
@@ -36,3 +37,28 @@ def get_current_user(token: str = Security(oauth2_scheme)):
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def verify_token(token: str):
+    """
+    Verifies the JWT token and returns the user's email if valid.
+
+    Args:
+        token (str): The JWT token to verify.
+
+    Returns:
+        Optional[str]: The user's email if the token is valid, None otherwise.
+    """
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")  # Extract the email (subject)
+        return email  # Return the email if the token is valid
+    except jwt.ExpiredSignatureError:
+        print("Token expired")
+        return None
+    except jwt.InvalidTokenError:
+        print("Invalid token")
+        return None
+    except Exception as e:
+        print(f"Error verifying token: {e}")
+        return None

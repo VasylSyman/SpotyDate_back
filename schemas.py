@@ -54,3 +54,25 @@ class TrackBasicInfo(BaseModel):
 
 class GenreList(BaseModel):
     genres: List[str]
+
+class MessageBase(BaseModel):
+    match_id: int
+    message_text: str
+
+class MessageCreate(MessageBase):
+    pass
+
+class Message(MessageBase):
+    message_id: int
+    sender_id: int # user_id of the sender
+    sent_at: datetime
+    read_at: Optional[datetime] = None
+
+
+class Conversation(BaseModel):
+    match_id: int
+    # You might want to add details about the other user in the conversation here
+    # other_user_id: int
+    # other_user_name: str
+    # last_message: Optional[Message] = None
+    messages: List[Message]
