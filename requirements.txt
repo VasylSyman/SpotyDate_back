@@ -6,3 +6,4 @@ python-dotenv~=1.0.1
 pydantic~=2.10.6
 supabase~=2.13.0
 spotipy~=2.25.0
+python-multipart
