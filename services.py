@@ -1,11 +1,9 @@
 from supabase_client import get_supabase_client
 from schemas import *
-from fastapi import HTTPException
 from auth import *
 from datetime import timezone, datetime
 import os
 from dotenv import load_dotenv
-import spotipy
 
 load_dotenv()
 SUPABASE_STORAGE_URL = os.getenv("SUPABASE_STORAGE_URL")
@@ -91,8 +89,6 @@ async def current_user_data(email: str) -> dict:
     ] if genre_response.data else []
 
     user_data["genres"] = genres
-
-    #user_data.pop("user_id", None)
 
     return user_data
 
@@ -269,7 +265,6 @@ async def fetch_and_process_genres(spotify, current_user_email):
     time_range = "medium_term"
 
 
-    # --- 1. Process Saved Tracks ---
     saved_tracks_data = spotify.current_user_saved_tracks(limit=top_limit)
     if saved_tracks_data and 'items' in saved_tracks_data:
         for item in saved_tracks_data.get('items', []):
@@ -280,7 +275,6 @@ async def fetch_and_process_genres(spotify, current_user_email):
                         all_artist_ids.add(artist['id'])
 
 
-    # --- 2. Process Top Tracks ---
     top_tracks_data = spotify.current_user_top_tracks(limit=top_limit, time_range=time_range)
     if top_tracks_data and 'items' in top_tracks_data:
         for track in top_tracks_data.get('items', []):
@@ -289,7 +283,6 @@ async def fetch_and_process_genres(spotify, current_user_email):
                     if artist and artist.get('id'):
                         all_artist_ids.add(artist['id'])
 
-    # --- 3. Process Top Artists (Direct Genre Addition + ID Collection) ---
     top_artists_data = spotify.current_user_top_artists(limit=top_limit, time_range=time_range)
     if top_artists_data and 'items' in top_artists_data:
         for artist in top_artists_data.get('items', []):
@@ -301,7 +294,6 @@ async def fetch_and_process_genres(spotify, current_user_email):
                 if artist_genres:
                     all_genres.update(artist_genres)
 
-    # --- 4. Fetch Details for All Collected Artist IDs ---
     if all_artist_ids:
         artist_ids_list = list(all_artist_ids)
         batch_size = 50
@@ -313,14 +305,11 @@ async def fetch_and_process_genres(spotify, current_user_email):
                     if artist and artist.get('genres'):
                         all_genres.update(artist['genres'])
 
-
-    # --- 5. Return Final Sorted List ---
     sorted_genres = sorted(list(all_genres))
     await genres_upload(sorted_genres, current_user_email)
 
     return sorted_genres
 
-#--------------------------------------------------------------------------------------------------------------------------------------------
 
 async def find_matches(current_user_email: str):
     user_response = supabase.table("users").select("user_id").eq("email", current_user_email).maybe_single().execute()
@@ -433,12 +422,7 @@ async def process_spotify_connection(spotify, current_user_email: str):
 
 
 async def get_match_details(current_user_id: int, match_user_id: int, match_score: float, match_id: int):
-    """
-    Optimized version of get_match_details that reduces database queries by batching requests.
-    Gets detailed information about a match including personal data and shared musical preferences.
-    """
     try:
-        # Fetch basic user information
         match_user = supabase.table("users") \
             .select("user_id, first_name, last_name, profile_picture_url, birth_date, gender, bio, location") \
             .eq("user_id", match_user_id) \
@@ -450,9 +434,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
 
         user_data = match_user.data
 
-        # STEP 1: Get all IDs in a single batch for each category
-
-        # Get genre IDs for both users
         current_user_genres = supabase.table("user_genres") \
             .select("genre_id") \
             .eq("user_id", current_user_id) \
@@ -463,7 +444,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
             .eq("user_id", match_user_id) \
             .execute()
 
-        # Get artist IDs for both users
         current_user_artists = supabase.table("user_artists") \
             .select("artist_id") \
             .eq("user_id", current_user_id) \
@@ -474,7 +454,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
             .eq("user_id", match_user_id) \
             .execute()
 
-        # Get track IDs for both users
         current_user_tracks = supabase.table("user_tracks") \
             .select("track_id") \
             .eq("user_id", current_user_id) \
@@ -485,7 +464,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
             .eq("user_id", match_user_id) \
             .execute()
 
-        # STEP 2: Find intersections for each category
         current_genre_ids = [item.get("genre_id") for item in current_user_genres.data]
         match_genre_ids = [item.get("genre_id") for item in match_user_genres.data]
         shared_genre_ids = list(set(current_genre_ids).intersection(set(match_genre_ids)))
@@ -498,9 +476,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
         match_track_ids = [item.get("track_id") for item in match_user_tracks.data]
         shared_track_ids = list(set(current_track_ids).intersection(set(match_track_ids)))
 
-        # STEP 3: Batch fetch names for each category using "in" filter
-
-        # Get genre names in a single query
         shared_genres = []
         if shared_genre_ids:
             genres_data = supabase.table("genres") \
@@ -511,7 +486,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
             genre_map = {item.get("genre_id"): item.get("name") for item in genres_data.data}
             shared_genres = [genre_map.get(genre_id) for genre_id in shared_genre_ids if genre_id in genre_map]
 
-        # Get artist names in a single query
         shared_artists = []
         if shared_artist_ids:
             artists_data = supabase.table("artists") \
@@ -522,7 +496,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
             artist_map = {item.get("artist_id"): item.get("name") for item in artists_data.data}
             shared_artists = [artist_map.get(artist_id) for artist_id in shared_artist_ids if artist_id in artist_map]
 
-        # Get track names in a single query
         shared_tracks = []
         if shared_track_ids:
             tracks_data = supabase.table("tracks") \
@@ -533,7 +506,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
             track_map = {item.get("track_id"): item.get("name") for item in tracks_data.data}
             shared_tracks = [track_map.get(track_id) for track_id in shared_track_ids if track_id in track_map]
 
-        # Calculate the age from birth_date
         age = None
         if user_data.get("birth_date"):
             from datetime import datetime
@@ -541,7 +513,6 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
             today = datetime.now().date()
             age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
 
-        # Construct the response
         return {
             "match_id": match_id,
             "user_id": match_user_id,
@@ -568,10 +539,7 @@ async def get_match_details(current_user_id: int, match_user_id: int, match_scor
         print(f"Error getting match details: {str(e)}")
         return None
 
-#----------------------------------------------------------------------------------------------------
-
 async def get_user_id_from_email(email: str) -> int:
-    """Helper function to get user_id from email."""
     user_response =  supabase.table("users").select("user_id").eq("email", email).maybe_single().execute()
     if not user_response.data:
         raise HTTPException(status_code=404, detail="User not found")
@@ -579,7 +547,6 @@ async def get_user_id_from_email(email: str) -> int:
 
 
 async def get_user_email_from_id(user_id: int) -> str:
-    """Helper function to get email from user_id."""
     user_response = supabase.table("users").select("email").eq("user_id", user_id).maybe_single().execute()
     if not user_response.data:
         raise ValueError("User not found")
@@ -587,7 +554,6 @@ async def get_user_email_from_id(user_id: int) -> str:
 
 
 async def get_match_by_id(match_id: int):
-    """Helper to check if a match exists and retrieve its participants."""
     match_response =  supabase.table("matches").select("user1_id, user2_id").eq("match_id",
                                                                                      match_id).maybe_single().execute()
     if not match_response.data:
@@ -598,7 +564,6 @@ async def get_match_by_id(match_id: int):
 async def create_chat_message_service(message: MessageCreate, sender_email: str) -> Message:
     sender_id = await get_user_id_from_email(sender_email)
 
-    # Verify the sender is part of the match
     match_data = await get_match_by_id(message.match_id)
     if not match_data:
         raise HTTPException(status_code=404, detail="Match not found")
@@ -610,7 +575,7 @@ async def create_chat_message_service(message: MessageCreate, sender_email: str)
         "match_id": message.match_id,
         "sender_id": sender_id,
         "message_text": message.message_text,
-        "sent_at": datetime.utcnow().isoformat()  # Store as ISO format string, Supabase handles timestamp
+        "sent_at": datetime.utcnow().isoformat()
     }
 
     try:
@@ -618,8 +583,6 @@ async def create_chat_message_service(message: MessageCreate, sender_email: str)
         if not response.data:
             raise HTTPException(status_code=500, detail="Could not send message")
 
-        # Assuming the response.data[0] contains the newly created message with all fields
-        # Adjust based on actual Supabase response structure
         created_message = response.data[0]
         return Message(
             message_id=created_message['message_id'],
@@ -627,12 +590,10 @@ async def create_chat_message_service(message: MessageCreate, sender_email: str)
             sender_id=created_message['sender_id'],
             message_text=created_message['message_text'],
             sent_at=datetime.fromisoformat(created_message['sent_at'].replace('Z', '+00:00')),
-            # Ensure timezone handling
             read_at=datetime.fromisoformat(created_message['read_at'].replace('Z', '+00:00')) if created_message.get(
                 'read_at') else None
         )
     except Exception as e:
-        # Log the error e
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
@@ -640,7 +601,6 @@ async def get_chat_messages_service(match_id: int, current_user_email: str, page
     Message]:
     current_user_id = await get_user_id_from_email(current_user_email)
 
-    # Verify the current user is part of the match
     match_data = await get_match_by_id(match_id)
     if not match_data:
         raise HTTPException(status_code=404, detail="Match not found")
@@ -672,9 +632,8 @@ async def get_chat_messages_service(match_id: int, current_user_email: str, page
                 read_at=datetime.fromisoformat(msg_data['read_at'].replace('Z', '+00:00')) if msg_data.get(
                     'read_at') else None
             ))
-        return messages  # Messages will be newest first, you might want to reverse this on the client or here
+        return messages
     except Exception as e:
-        # Log the error e
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
@@ -689,7 +648,6 @@ async def mark_messages_as_read_service(match_id: int, reader_email: str):
         raise HTTPException(status_code=403, detail="User is not part of this match")
 
     try:
-        # Update messages where the reader is NOT the sender and read_at is null
         response =  supabase.table("messages") \
             .update({"read_at": datetime.utcnow().isoformat()}) \
             .eq("match_id", match_id) \
@@ -697,23 +655,15 @@ async def mark_messages_as_read_service(match_id: int, reader_email: str):
             .is_("read_at", None) \
             .execute()
 
-        # response.data might be empty even on success for updates, check count if available or rely on no exception
         return {"status": "success", "updated_count": len(
             response.data) if response.data else "unknown (check Supabase logs for actual count)"}
     except Exception as e:
-        # Log the error e
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 async def get_user_conversations_service(current_user_email: str):
-    """
-    Fetches all matches (conversations) for the current user,
-    optionally with the last message for each.
-    This is a simplified version; you might want more complex logic for last message.
-    """
     current_user_id = await get_user_id_from_email(current_user_email)
 
-    # Get matches where the current user is user1_id or user2_id
     query1 = supabase.table("matches").select("match_id, user1_id, user2_id").eq("user1_id", current_user_id)
     query2 = supabase.table("matches").select("match_id, user1_id, user2_id").eq("user2_id", current_user_id)
 
@@ -726,14 +676,12 @@ async def get_user_conversations_service(current_user_email: str):
     if response2.data:
         all_matches_data.extend(response2.data)
 
-    # Deduplicate matches if necessary
     unique_matches = {m['match_id']: m for m in all_matches_data}.values()
 
     conversations_summary = []
     for match_info in unique_matches:
         other_user_id = match_info['user2_id'] if match_info['user1_id'] == current_user_id else match_info['user1_id']
 
-        # Fetch other user's info
         other_user_response = supabase.table("users").select(
             "user_id, first_name, last_name, profile_picture_url"
         ).eq("user_id", other_user_id).maybe_single().execute()
@@ -746,7 +694,6 @@ async def get_user_conversations_service(current_user_email: str):
                 "profile_picture_url": other_user_response.data.get('profile_picture_url')
             }
 
-        # Get last message for the match
         last_message_summary = None
         last_message_response = supabase.table("messages") \
             .select("message_text, sent_at, sender_id") \
@@ -773,5 +720,3 @@ async def get_user_conversations_service(current_user_email: str):
         })
 
     return conversations_summary
-
-# ... (keep your existing service functions)
